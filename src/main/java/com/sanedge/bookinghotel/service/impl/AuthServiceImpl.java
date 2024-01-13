@@ -1,0 +1,233 @@
+package com.sanedge.bookinghotel.service.impl;
+
+import java.text.SimpleDateFormat;
+import java.time.Instant;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.Optional;
+import java.util.Set;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.sanedge.bookinghotel.domain.request.auth.ForgotRequest;
+import com.sanedge.bookinghotel.domain.request.auth.LoginRequest;
+import com.sanedge.bookinghotel.domain.request.auth.RegisterRequest;
+import com.sanedge.bookinghotel.domain.request.auth.ResetPasswordRequest;
+import com.sanedge.bookinghotel.domain.response.MessageResponse;
+import com.sanedge.bookinghotel.domain.response.auth.AuthResponse;
+import com.sanedge.bookinghotel.domain.response.auth.TokenRefreshResponse;
+import com.sanedge.bookinghotel.enums.ERole;
+import com.sanedge.bookinghotel.exception.ResourceNotFoundException;
+import com.sanedge.bookinghotel.exception.TokenRefreshException;
+import com.sanedge.bookinghotel.models.RefreshToken;
+import com.sanedge.bookinghotel.models.ResetToken;
+import com.sanedge.bookinghotel.models.Role;
+import com.sanedge.bookinghotel.models.User;
+import com.sanedge.bookinghotel.repository.RoleRepository;
+import com.sanedge.bookinghotel.repository.UserRepository;
+import com.sanedge.bookinghotel.security.JwtProvider;
+import com.sanedge.bookinghotel.security.UserDetailsImpl;
+import com.sanedge.bookinghotel.service.AuthMailService;
+import com.sanedge.bookinghotel.service.AuthService;
+import com.sanedge.bookinghotel.service.ResetTokenService;
+import com.sanedge.bookinghotel.utils.RandomString;
+
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+@Service
+public class AuthServiceImpl implements AuthService {
+    private final AuthenticationManager authenticationManager;
+    private final UserRepository userRepository;
+    private final RoleRepository roleRepository;
+    private final JwtProvider jwtProvider;
+    private final PasswordEncoder passwordEncoder;
+    private final RefreshTokenServiceImpl refreshTokenService;
+    private final AuthMailService authMailService;
+    private final ResetTokenService resetTokenService;
+
+    @Autowired
+    public AuthServiceImpl(AuthenticationManager authenticationManager, UserRepository userRepository,
+            RoleRepository roleRepository, PasswordEncoder passwordEncoder, JwtProvider jwtProvider,
+            RefreshTokenServiceImpl refreshTokenServiceImpl, AuthMailService authMailService,
+            ResetTokenService resetTokenService) {
+        this.authenticationManager = authenticationManager;
+        this.userRepository = userRepository;
+        this.roleRepository = roleRepository;
+        this.jwtProvider = jwtProvider;
+        this.passwordEncoder = passwordEncoder;
+        this.refreshTokenService = refreshTokenServiceImpl;
+        this.authMailService = authMailService;
+        this.resetTokenService = resetTokenService;
+    }
+
+    @Override
+    public MessageResponse login(LoginRequest request) {
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword()));
+
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        String jwt = jwtProvider.generateAccessToken(authentication);
+
+        long expiresAt = jwtProvider.getjwtExpirationMs();
+        Date date = new Date();
+        date.setTime(expiresAt);
+
+        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+
+        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+
+        User user = userRepository.findByUsername(userDetails.getUsername())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        Optional<RefreshToken> existingRefreshToken = refreshTokenService.findByUser(user);
+
+        if (existingRefreshToken.isPresent()) {
+            refreshTokenService.updateExpiryDate(existingRefreshToken.get());
+        } else {
+            refreshTokenService.deleteByUserId(userDetails.getId());
+            RefreshToken refreshToken = refreshTokenService.createRefreshToken(userDetails.getId());
+            existingRefreshToken = Optional.of(refreshToken);
+        }
+
+        AuthResponse authResponse = AuthResponse.builder()
+                .access_token(jwt)
+                .refresh_token(existingRefreshToken.get().getToken())
+                .expiresAt(dateFormat.format(date))
+                .username(userDetails.getUsername())
+                .build();
+
+        return MessageResponse.builder().message("Berhasil login").data(authResponse).build();
+    }
+
+    @Override
+    public MessageResponse register(RegisterRequest registerRequest) {
+        User user = new User();
+        user.setUsername(registerRequest.getUsername());
+        user.setEmail(registerRequest.getEmail());
+        user.setPassword(passwordEncoder.encode(registerRequest.getPassword()));
+
+        Set<String> strRoles = registerRequest.getRole();
+        Set<Role> roles = new HashSet<>();
+
+        if (strRoles == null) {
+            Role userRole = roleRepository.findByName(ERole.ROLE_USER)
+                    .orElseThrow(() -> new ResourceNotFoundException("Error: Role is not found."));
+            roles.add(userRole);
+        } else {
+            strRoles.forEach(role -> {
+                switch (role) {
+                    case "admin":
+                        Role adminRole = roleRepository.findByName(ERole.ROLE_ADMIN)
+                                .orElseThrow(() -> new ResourceNotFoundException("Error: Role is not found."));
+                        roles.add(adminRole);
+
+                        break;
+                    case "mod":
+                        Role modRole = roleRepository.findByName(ERole.ROLE_MODERATOR)
+                                .orElseThrow(() -> new ResourceNotFoundException("Error: Role is not found."));
+                        roles.add(modRole);
+
+                        break;
+                    default:
+                        Role userRole = roleRepository.findByName(ERole.ROLE_USER)
+                                .orElseThrow(() -> new ResourceNotFoundException("Error: Role is not found."));
+                        roles.add(userRole);
+                }
+            });
+        }
+        user.setRoles(roles);
+        user.setVerified(false);
+
+        String token = RandomString.generateRandomString(50);
+
+        user.setVerificationCode(token);
+
+        this.userRepository.save(user);
+
+        authMailService.sendEmailVerify(registerRequest.getEmail(), token);
+
+        return MessageResponse.builder().message("Successs create user").data(null).statusCode(200).build();
+
+    }
+
+    @Override
+    public MessageResponse forgotPassword(ForgotRequest request) {
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        ResetToken resetToken = resetTokenService.createResetToken(user);
+
+        String resetLink = "http://localhost:8080/api/auth/reset-password?token=" + resetToken.getToken();
+        authMailService.sendResetPasswordEmail(user.getEmail(), resetLink);
+
+        return MessageResponse.builder().message("Successs send email").statusCode(200).build();
+    }
+
+    @Override
+    public MessageResponse resetPassword(ResetPasswordRequest request) {
+        ResetToken resetToken = resetTokenService.findByToken(request.getToken())
+                .orElseThrow(() -> new ResourceNotFoundException("Invalid or expired token"));
+
+        if (resetToken.getExpiryDate().isBefore(Instant.now())) {
+            return MessageResponse.builder().message("Reset token has expired.").statusCode(400).build();
+        }
+
+        User user = resetToken.getUser();
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
+        userRepository.save(user);
+
+        resetTokenService.deleteResetToken(user.getId());
+
+        return MessageResponse.builder().message("Password reset successfully.").statusCode(200).build();
+    }
+
+    public MessageResponse verifyEmail(String token) {
+        Optional<User> user = userRepository.findByVerificationCode(token);
+        if (user.isEmpty()) {
+            return MessageResponse.builder().message("Verification code not found").statusCode(404).build();
+        }
+        user.get().setVerified(true);
+        userRepository.save(user.get());
+        return MessageResponse.builder().message("Successs verify email").statusCode(200).build();
+    }
+
+    @Transactional(readOnly = true)
+    public User getCurrentUser() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+
+        return this.userRepository.findByUsername(authentication.getName())
+                .orElseThrow(
+                        () -> new UsernameNotFoundException("User name not found - " + authentication.getName()));
+    }
+
+    @Override
+    public TokenRefreshResponse refreshToken(String refreshToken) {
+        return refreshTokenService.findByToken(refreshToken)
+                .map(refreshTokenService::verifyExpiration)
+                .map(RefreshToken::getUser)
+                .map(user -> {
+                    String newAccessToken = jwtProvider.generateTokenFromUsername(user.getUsername());
+
+                    return new TokenRefreshResponse(newAccessToken, refreshToken);
+                })
+                .orElseThrow(() -> new TokenRefreshException(refreshToken,
+                        "Invalid or expired refresh token"));
+    }
+
+    @Override
+    public MessageResponse logout() {
+        refreshTokenService.deleteByUserId(getCurrentUser().getId());
+        return MessageResponse.builder().message("Logout success").statusCode(200).build();
+    }
+
+}
