@@ -1,7 +1,5 @@
 package com.sanedge.bookinghotel.models;
 
-import java.sql.Timestamp;
-
 import com.sanedge.bookinghotel.enums.RoomStatus;
 
 import jakarta.persistence.Column;

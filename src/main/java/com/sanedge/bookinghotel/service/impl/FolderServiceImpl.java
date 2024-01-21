@@ -2,7 +2,6 @@ package com.sanedge.bookinghotel.service.impl;
 
 import java.io.File;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.sanedge.bookinghotel.service.FolderService;

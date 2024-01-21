@@ -106,6 +106,8 @@ public class AuthServiceImpl implements AuthService {
                 .username(userDetails.getUsername())
                 .build();
 
+        log.info("User successfully logged in: {}", userDetails.getUsername());
+
         return MessageResponse.builder().message("Berhasil login").data(authResponse).build();
     }
 
@@ -156,6 +158,8 @@ public class AuthServiceImpl implements AuthService {
 
         authMailService.sendEmailVerify(registerRequest.getEmail(), token);
 
+        log.info("User registered successfully: {}", user.getUsername());
+
         return MessageResponse.builder().message("Successs create user").data(null).statusCode(200).build();
 
     }
@@ -169,6 +173,8 @@ public class AuthServiceImpl implements AuthService {
 
         String resetLink = "http://localhost:8080/api/auth/reset-password?token=" + resetToken.getToken();
         authMailService.sendResetPasswordEmail(user.getEmail(), resetLink);
+
+        log.info("Forgot password request processed for user: {}", user.getEmail());
 
         return MessageResponse.builder().message("Successs send email").statusCode(200).build();
     }
@@ -188,17 +194,25 @@ public class AuthServiceImpl implements AuthService {
 
         resetTokenService.deleteResetToken(user.getId());
 
+        log.info("Password reset successfully for user: {}", user.getUsername());
+
         return MessageResponse.builder().message("Password reset successfully.").statusCode(200).build();
     }
 
     public MessageResponse verifyEmail(String token) {
-        Optional<User> user = userRepository.findByVerificationCode(token);
-        if (user.isEmpty()) {
+        Optional<User> optionalUser = userRepository.findByVerificationCode(token);
+
+        if (optionalUser.isPresent()) {
+            User user = optionalUser.get();
+            user.setVerified(true);
+            userRepository.save(user);
+
+            log.info("Email verification successful for user: {}", user.getUsername());
+            return MessageResponse.builder().message("Success verify email").statusCode(200).build();
+        } else {
+            log.info("Verification code not found: {}", token);
             return MessageResponse.builder().message("Verification code not found").statusCode(404).build();
         }
-        user.get().setVerified(true);
-        userRepository.save(user.get());
-        return MessageResponse.builder().message("Successs verify email").statusCode(200).build();
     }
 
     @Transactional(readOnly = true)
@@ -227,6 +241,7 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public MessageResponse logout() {
         refreshTokenService.deleteByUserId(getCurrentUser().getId());
+        log.info("User logged out successfully");
         return MessageResponse.builder().message("Logout success").statusCode(200).build();
     }
 
