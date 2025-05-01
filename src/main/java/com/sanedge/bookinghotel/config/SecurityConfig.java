@@ -34,6 +34,19 @@ public class SecurityConfig {
     @Autowired
     private AuthTokenEntryPoint unauthorizedHandler;
 
+    private static final String[] PUBLIC_ENDPOINTS = {
+            "/api/test",
+            "/static/**",
+            "/api/auth/login",
+            "/api/auth/register",
+            "/api/auth/reset",
+            "/api/auth/forgot",
+            "/v3/api-docs/**",
+            "/swagger-ui/**",
+            "/swagger-ui.html",
+            "/api-docs/**"
+    };
+
     @Bean
     public AuthTokenFilter authenticationJwtTokenFilter() {
         return new AuthTokenFilter();
@@ -68,9 +81,7 @@ public class SecurityConfig {
                         sessionManager -> sessionManager.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(exceptionHandling -> exceptionHandling.authenticationEntryPoint(unauthorizedHandler))
                 .authorizeHttpRequests(requests -> requests
-                        .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers("/api/test").permitAll()
-                        .requestMatchers("/static").permitAll()
+                        .requestMatchers(PUBLIC_ENDPOINTS).permitAll()
                         .anyRequest().authenticated())
                 .authenticationProvider(authenticationProvider())
                 .addFilterBefore(authenticationJwtTokenFilter(), UsernamePasswordAuthenticationFilter.class)

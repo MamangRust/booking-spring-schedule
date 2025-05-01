@@ -1,11 +1,22 @@
-## Booking hotel
+# 🏨 Booking Hotel
 
-This project is designed for managing hotel bookings, user authentication, and related functionalities.
+**Booking Hotel** is a hotel booking management system that includes user authentication and various related features. This application is built with **Spring Boot** and uses **PostgreSQL** as the main database. The system also provides **OpenAPI** documentation and can be easily deployed in a **Docker** environment.
 
-## How to use
+## ✨ Features
 
-### Running on Docker
+- **Hotel Booking Management** – Users can book hotel rooms with multiple available options.
+- **User Authentication** – Supports user registration, login, and account management.
+- **API Documentation** – Uses **OpenAPI** for documentation and API exploration.
+- **Relational Database** – Stores user and booking data using **PostgreSQL**.
+- **Containerized Deployment** – Easily deployable with **Docker**.
 
-```
-docker-compose up -d build
-```
+
+## ERD & Swagger
+
+### ERD
+
+<img src="./images/erd_booking.png" alt="erd">
+
+
+### Swagger
+<img src="./images/swagger.png" alt="swagger">
